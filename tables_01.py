@@ -16,14 +16,15 @@ class Table:
     - cells can be address by row, col, or by a name provided at creation
 
     """
-
-    t = []
+    w = None
+    h = None
+    t = [[]]
     tags = None
 
-    def __init__(self, name="t", header_row=True):
+    def __init__(self, name="t", **kwargs):
 
         self._tag_root = f"{name}"
-        self._header_row = header_row
+        self._kwargs = kwargs
 
     def table(self, t):
         self.t = t
@@ -32,21 +33,23 @@ class Table:
         self.tags = tags
 
     def create(self):
-        with dpg.table(tag=self._tag_root,
-                       header_row=self._header_row,
-                       row_background=True,
-                       borders_innerH=True,
-                       borders_outerH=True,
-                       borders_innerV=True,
-                       borders_outerV=True,
-                       delay_search=True):
+        with dpg.table(**self._kwargs, tag=self._tag_root):
 
-            if self._header_row:
-                for h in self.t[0]:
-                    dpg.add_table_column(label=h)
+            if self._kwargs.get("header_row", False) and self.h:
+                if self.w:
+                    width = sum(self.w) + len(self.w) * 10
+                    dpg.configure_item(self._tag_root, width=width)
+                    for h, w in zip(self.h, self.w):
+                        dpg.add_table_column(label=h, width_fixed=True, init_width_or_weight=w)
+                else:
+                    for h in self.h:
+                        dpg.add_table_column(label=h)
+
+            else:
+                dpg.add_table_column()
 
             r, c = 0, 0
-            for row in self.t[1:]:
+            for row in self.t:
                 with dpg.table_row():
                     c = 0
                     for i in row:
@@ -87,6 +90,11 @@ class Table:
         tag = f"{self._tag_root}_{name}"
         dpg.set_value(tag, value)
 
+    def set_cell_values_by_name(self, n_v_list: list):
+        for (name, value) in n_v_list:
+            tag = f"{self._tag_root}_{name}"
+            dpg.set_value(tag, value)
+
     def get_cell_value(self, row, col):
         tag = self.__tag(row, col)
         return dpg.get_value(tag)
@@ -104,11 +112,16 @@ class Table:
 
 class Stats(Table):
 
+    # widths
+    w = [60, 80, 80, 80, 60]
+
+    # header
+    h = ["Item", "   Min", "   AVG", "   Max", " Units"]     # header
+
     # Labels and default values of the table
     t = [
-        ["",  "Min", "AVG", "Max", "Units"],     # header
-        ["Current",  0.0,   0.0,   0.0,   "  mA"],
-        ["Coulombs", None,  0.0,  None,   "  mC"],
+        ["Current",    "{:10,.3f}".format(0.0),   "{:10,.3f}".format(0.0),   "{:10,.3f}".format(0.0),   "  mA"],
+        ["Coulombs",    None,   "{:10,.3f}".format(0.0),    None,   "  mC"],
     ]
 
     # a list of tag alias names, to address a cell by its functional name
@@ -117,18 +130,24 @@ class Stats(Table):
     # - use None for no alias(es)
     tags = [
         [None,  "cur_min",   "cur_avg",   "cur_max",   None],
-        [None,  "clb_min",   "clb_avg",   "clb_max",   None],
+        [None,       None,   "clb_avg",        None,   None],
     ]
     # tags = None
 
-    def __init__(self, name="t", header_row=True):
-        super().__init__(name, header_row)
+    def __init__(self, name="t", **kwargs):
+        super().__init__(name, **kwargs)
 
 
 with dpg.window(label="Plotted Stats", pos=(100, 120),
                 height=130, width=400, collapsed=True, no_close=True):
 
-    plotted_stats_table = Stats("tbl_plotted_stats")
+    plotted_stats_table = Stats("tbl_plotted_stats",
+                                header_row=True,
+                                row_background=True,
+                                borders_innerH=True,
+                                borders_outerH=True,
+                                borders_innerV=True,
+                                borders_outerV=True)
     plotted_stats_table.create()
 
 
