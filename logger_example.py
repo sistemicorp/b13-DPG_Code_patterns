@@ -44,9 +44,12 @@ def _timer_cb():
     else:
         mylogger.log_info(count, source, msg)
 
-    if count < 150:
-        _tmr = Timer(0.5, _timer_cb)
+    if count < 100:  # stops the simulation
+        _tmr = Timer(0.2, _timer_cb)
         _tmr.start()
+
+    else:
+        mylogger.log("NOW", "MAIN", "This is the end of the logging", mylogger.LOG_LEVEL_INFO)
 
 
 count = 0

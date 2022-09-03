@@ -68,6 +68,10 @@ class Logger:
 
         with dpg.group(horizontal=True):
 
+            dpg.add_button(label="Clear",
+                           callback=lambda s, u, a: self._cb_button_clear(s, u, a),
+                           tag=self.__tag("button_clear"))
+
             dpg.add_button(label="Export",
                            callback=lambda s, u, a: self._cb_button_export(s, u, a),
                            tag=self.__tag("button_export"))
@@ -148,6 +152,9 @@ class Logger:
         return self._sources[source]["show"]
 
     def _add_table_row(self, timestamp, source, log_level, msg):
+        if not isinstance(timestamp, str):
+            timestamp = str(timestamp)
+
         with self._lock:
             r = [timestamp, source, log_level, msg]
             self._rows.append(r)
@@ -225,6 +232,25 @@ class Logger:
         self.logger.info(f"{sender} {app_data} {user_data}")
         self._scrolling = not self._scrolling
 
+    def _clear_logger(self, clear_sources):
+        with self._lock:
+            if clear_sources:
+                self._sources = {}
+                listbox_sources = self._create_listbox_sources_items()
+                dpg.configure_item(self.__tag("combo_sources"), items=listbox_sources)
+                dpg.set_value(self.__tag("combo_sources"), "Sources")
+
+            for i in range(self._table_rows):
+                tag = self.__tag(f"row_{i}")
+                dpg.delete_item(tag)
+
+            self._table_rows = 0
+            self._rows = []
+
+    def _cb_button_clear(self, sender, app_data, user_data):
+        self.logger.info(f"{sender} {app_data} {user_data}")
+        self._clear_logger(clear_sources=True)
+
     def _cb_button_export(self, sender, app_data, user_data):
         self.logger.info(f"{sender} {app_data} {user_data}")
 
@@ -297,6 +323,14 @@ class Logger:
         self._log_level = level
         self.__update_show_rows()
 
+    def clear(self, clear_sources=False):
+        """ Clear all the log lines
+
+        :param clear_sources: [True|False], when set clears all known sources
+        :return: None
+        """
+        self._clear_logger(clear_sources)
+
     def log_trace(self, timestamp, source, message):
         self._add_table_row(timestamp, source, self.LOG_LEVEL_TRACE, message)
 
@@ -304,6 +338,13 @@ class Logger:
         self._add_table_row(timestamp, source, self.LOG_LEVEL_DEBUG, message)
 
     def log_info(self, timestamp, source, message):
+        """ Log at Info level
+
+        :param timestamp: string, or something that is convertible to string
+        :param source: string
+        :param message: string
+        :return: None
+        """
         self._add_table_row(timestamp, source, self.LOG_LEVEL_INFO, message)
 
     def log_warn(self, timestamp, source, message):
