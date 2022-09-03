@@ -2,6 +2,9 @@ import dearpygui.dearpygui as dpg
 from threading import Timer
 from logger_klass import Logger
 
+import logging
+logging.basicConfig(level=logging.INFO)
+
 dpg.create_context()
 dpg.create_viewport()
 dpg.setup_dearpygui()
@@ -9,7 +12,7 @@ dpg.setup_dearpygui()
 
 WINDOW_WIDTH = 600
 with dpg.window(label="Logger", width=WINDOW_WIDTH, height=600):
-    mylogger = Logger("mylogger")
+    mylogger = Logger("mylogger", loggerIn=logging)
 
 
 def _timer_cb():
@@ -58,6 +61,9 @@ _tmr.start()
 
 dpg.show_viewport()
 dpg.start_dearpygui()
+
 _tmr.cancel()
+mylogger.shutdown()
+
 dpg.destroy_context()
 

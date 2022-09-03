@@ -1,8 +1,11 @@
 import dearpygui.dearpygui as dpg
-from threading import Lock, Thread
+from threading import Lock, Thread, Event
+import queue
+import traceback
+import time
 
 
-class Logger:
+class Logger(Thread):
 
     LOG_LEVEL_TRACE = 0
     LOG_LEVEL_DEBUG = 1
@@ -24,9 +27,15 @@ class Logger:
     TABLE_COL_MSG_WIDTH = 20
     TABLE_FIXED_WIDTH = TABLE_COL_TIMESTAMP_WIDTH + TABLE_COL_SOURCE_WIDTH + TABLE_COL_LOGLEVEL_WIDTH
 
-    TABLE_FONT_HEIGHT = 10
+    TABLE_FONT_HEIGHT = 8
+
+    EVENT_SHUTDOWN = "EVENT_SHUTDOWN"
+    EVENT_LOG = "EVENT_LOG"
+    EVENT_EXPORT = "EVENT_EXPORT"
+    EVENT_CLEAR = "EVENT_CLEAR"
 
     def __init__(self, label="Logger", tag_root="logger", export_filename="log.txt", loggerIn=None):
+        super(Logger, self).__init__()
 
         class StubLogger(object):
             """ stubb out logger if none is provided"""
@@ -47,9 +56,14 @@ class Logger:
         self._scrolling = True
         self._log_level = self.LOG_LEVEL_INFO
         self._lock = Lock()
+        self._q = queue.Queue()
+        self._stop_event = Event()
         self._sources = {}
 
         self._rows = []
+
+        self.name = tag_root
+        self.start()
 
         self.LOG_LEVEL_MAP = {
             self.LOG_LEVEL_TRACE:    {"str": "TRACE", "color": (0, 255, 0, 255)},
@@ -119,6 +133,10 @@ class Logger:
                 dpg.add_table_column(width=self.TABLE_COL_MSG_WIDTH * self.TABLE_FONT_WIDTH,
                                      tag=self.__tag("col_msg"))  # message string
 
+    def __q(self, item_dict: dict):
+        self.logger.debug(item_dict)
+        self._q.put(item_dict)
+
     def __tag(self, item):
         """
         create a tag, append to list of known, and return it
@@ -155,66 +173,65 @@ class Logger:
         if not isinstance(timestamp, str):
             timestamp = str(timestamp)
 
-        with self._lock:
-            r = [timestamp, source, log_level, msg]
-            self._rows.append(r)
+        r = [timestamp, source, log_level, msg]
+        self._rows.append(r)
 
-            show_row = self._show_source(source)
-            if log_level < self._log_level:
-                show_row = False
+        show_row = self._show_source(source)
+        if log_level < self._log_level:
+            show_row = False
 
-            def _set_table_width(row_items):
-                # causes horizontal scroll bar to appear if necessary
-                w = (self.TABLE_FIXED_WIDTH + len(row_items[self.ROW_IDX_MSG])) * self.TABLE_FONT_WIDTH
-                if w > self._table_width:
-                    self._table_width = w
-                    dpg.configure_item(self.__tag("table"), width=w)
+        def _set_table_width(row_items):
+            # causes horizontal scroll bar to appear if necessary
+            w = (self.TABLE_FIXED_WIDTH + len(row_items[self.ROW_IDX_MSG])) * self.TABLE_FONT_WIDTH
+            if w > self._table_width:
+                self._table_width = w
+                dpg.configure_item(self.__tag("table"), width=w)
 
-            theme = self.LOG_LEVEL_MAP[log_level]["theme"]
+        theme = self.LOG_LEVEL_MAP[log_level]["theme"]
 
-            dpg.push_container_stack(self.__tag("table"))
-            with dpg.table_row(height=self.TABLE_FONT_HEIGHT,
-                               user_data=(log_level, source),
-                               show=show_row,
-                               tag=self.__tag(f"row_{self._table_rows}")):
+        dpg.push_container_stack(self.__tag("table"))
+        with dpg.table_row(height=self.TABLE_FONT_HEIGHT,
+                           user_data=(log_level, source),
+                           show=show_row,
+                           tag=self.__tag(f"row_{self._table_rows}")):
 
-                # NOTE: tried to set the column widths on selectable, but it breaks the
-                #       span all coulmns when mouse is selecting... choice between correct
-                #       selection or initial column widths.  As it is now, the columns will
-                #       expand as required.
+            # NOTE: tried to set the column widths on selectable, but it breaks the
+            #       span all coulmns when mouse is selecting... choice between correct
+            #       selection or initial column widths.  As it is now, the columns will
+            #       expand as required.
 
-                sel = dpg.add_selectable(label=timestamp,
-                                         span_columns=True,
-                                         callback=lambda s, u, a: self._cb_table_row(s, u, a),
-                                         user_data=(self.ROW_IDX_TIMESTAMP, self._table_rows))
-                dpg.bind_item_theme(sel, theme)
+            sel = dpg.add_selectable(label=timestamp,
+                                     span_columns=True,
+                                     callback=lambda s, u, a: self._cb_table_row(s, u, a),
+                                     user_data=(self.ROW_IDX_TIMESTAMP, self._table_rows))
+            dpg.bind_item_theme(sel, theme)
 
-                sel = dpg.add_selectable(label=source,
-                                         span_columns=True,
-                                         callback=lambda s, u, a: self._cb_table_row(s, u, a),
-                                         user_data=(self.ROW_IDX_SOURCE, self._table_rows))
-                dpg.bind_item_theme(sel, theme)
+            sel = dpg.add_selectable(label=source,
+                                     span_columns=True,
+                                     callback=lambda s, u, a: self._cb_table_row(s, u, a),
+                                     user_data=(self.ROW_IDX_SOURCE, self._table_rows))
+            dpg.bind_item_theme(sel, theme)
 
-                lvl = self.LOG_LEVEL_MAP[log_level]["str"]
-                sel = dpg.add_selectable(label=f"[{lvl:5s}]",
-                                         span_columns=True,
-                                         callback=lambda s, u, a: self._cb_table_row(s, u, a),
-                                         user_data=(self.ROW_IDX_LOGLEVEL, self._table_rows))
-                dpg.bind_item_theme(sel, theme)
+            lvl = self.LOG_LEVEL_MAP[log_level]["str"]
+            sel = dpg.add_selectable(label=f"[{lvl:5s}]",
+                                     span_columns=True,
+                                     callback=lambda s, u, a: self._cb_table_row(s, u, a),
+                                     user_data=(self.ROW_IDX_LOGLEVEL, self._table_rows))
+            dpg.bind_item_theme(sel, theme)
 
-                sel = dpg.add_selectable(label=msg,
-                                         span_columns=True,
-                                         callback=lambda s, u, a: self._cb_table_row(s, u, a),
-                                         user_data=(self.ROW_IDX_MSG, self._table_rows))
-                dpg.bind_item_theme(sel, theme)
+            sel = dpg.add_selectable(label=msg,
+                                     span_columns=True,
+                                     callback=lambda s, u, a: self._cb_table_row(s, u, a),
+                                     user_data=(self.ROW_IDX_MSG, self._table_rows))
+            dpg.bind_item_theme(sel, theme)
 
-            self._table_rows += 1
+        self._table_rows += 1
 
-            dpg.pop_container_stack()
-            if self._scrolling:
-                dpg.set_y_scroll(self.__tag("child_window"), -1.0)  # needed to keep scroll at bottom
+        dpg.pop_container_stack()
+        if self._scrolling:
+            dpg.set_y_scroll(self.__tag("child_window"), -1.0)  # needed to keep scroll at bottom
 
-            _set_table_width(r)
+        _set_table_width(r)
 
     def _cb_table_row(self, sender, app_data, user_data):
         self.logger.info(f"{sender} {app_data} {user_data}")
@@ -233,55 +250,56 @@ class Logger:
         self._scrolling = not self._scrolling
 
     def _clear_logger(self, clear_sources):
-        with self._lock:
-            if clear_sources:
-                self._sources = {}
-                listbox_sources = self._create_listbox_sources_items()
-                dpg.configure_item(self.__tag("combo_sources"), items=listbox_sources)
-                dpg.set_value(self.__tag("combo_sources"), "Sources")
+        if clear_sources:
+            self._sources = {}
+            listbox_sources = self._create_listbox_sources_items()
+            dpg.configure_item(self.__tag("combo_sources"), items=listbox_sources)
+            dpg.set_value(self.__tag("combo_sources"), "Sources")
 
-            for i in range(self._table_rows):
-                tag = self.__tag(f"row_{i}")
-                dpg.delete_item(tag)
+        for i in range(self._table_rows):
+            tag = self.__tag(f"row_{i}")
+            dpg.delete_item(tag)
 
-            self._table_rows = 0
-            self._rows = []
+        self._table_rows = 0
+        self._rows = []
+
+    def _event_clear(self, item):
+        self._clear_logger(clear_sources=True)
 
     def _cb_button_clear(self, sender, app_data, user_data):
         self.logger.info(f"{sender} {app_data} {user_data}")
-        self._clear_logger(clear_sources=True)
+        item_dict = {"type": self.EVENT_CLEAR}
+        self.__q(item_dict)
 
     def _cb_button_export(self, sender, app_data, user_data):
         self.logger.info(f"{sender} {app_data} {user_data}")
+        item_dict = {"type": self.EVENT_EXPORT}
+        self.__q(item_dict)
 
-        def _thread_export():
-            try:
-                with open(self._export_filename, "w") as f:
-                    with self._lock:
-                        for i in range(self._table_rows):
-                            row_tag = self.__tag(f"row_{i}")
-                            r = self._rows[i]
-                            if self._is_row_showing(row_tag):
-                                line = f"{r[self.ROW_IDX_TIMESTAMP]},{r[self.ROW_IDX_SOURCE]},{r[self.ROW_IDX_LOGLEVEL]},{r[self.ROW_IDX_MSG]}"
-                                print(line, file=f)
+    def _event_export(self, item):
+        try:
+            with open(self._export_filename, "w") as f:
+                for i in range(self._table_rows):
+                    row_tag = self.__tag(f"row_{i}")
+                    r = self._rows[i]
+                    if self._is_row_showing(row_tag):
+                        line = f"{r[self.ROW_IDX_TIMESTAMP]},{r[self.ROW_IDX_SOURCE]},{r[self.ROW_IDX_LOGLEVEL]},{r[self.ROW_IDX_MSG]}"
+                        print(line, file=f)
 
-            except Exception as e:
-                self.logger.error(e)
-                return
+        except Exception as e:
+            self.logger.error(e)
+            return
 
-            with dpg.window(label="Log Exported",
-                            width=200,
-                            height=50,
-                            modal=True,
-                            pos=(100, 100),
-                            no_collapse=True,
-                            no_move=True,
-                            no_resize=True):
+        with dpg.window(label="Log Exported",
+                        width=200,
+                        height=50,
+                        modal=True,
+                        pos=(100, 100),
+                        no_collapse=True,
+                        no_move=True,
+                        no_resize=True):
 
-                dpg.add_text(default_value=self._export_filename)
-
-        thrd = Thread(None, _thread_export)
-        thrd.start()
+            dpg.add_text(default_value=self._export_filename)
 
     def _is_row_showing(self, row_tag):
         row_level, row_source = dpg.get_item_user_data(row_tag)
@@ -331,11 +349,27 @@ class Logger:
         """
         self._clear_logger(clear_sources)
 
+    def _event_log(self, item):
+        self._add_table_row(item["timestamp"],
+                            item["source"],
+                            item["level"],
+                            item["message"])
+
     def log_trace(self, timestamp, source, message):
-        self._add_table_row(timestamp, source, self.LOG_LEVEL_TRACE, message)
+        item_dict = {"type": self.EVENT_LOG,
+                     "timestamp": timestamp,
+                     "level": self.LOG_LEVEL_TRACE,
+                     "source": source,
+                     "message": message}
+        self.__q(item_dict)
 
     def log_debug(self, timestamp, source, message):
-        self._add_table_row(timestamp, source, self.LOG_LEVEL_DEBUG, message)
+        item_dict = {"type": self.EVENT_LOG,
+                     "timestamp": timestamp,
+                     "level": self.LOG_LEVEL_DEBUG,
+                     "source": source,
+                     "message": message}
+        self.__q(item_dict)
 
     def log_info(self, timestamp, source, message):
         """ Log at Info level
@@ -345,17 +379,85 @@ class Logger:
         :param message: string
         :return: None
         """
-        self._add_table_row(timestamp, source, self.LOG_LEVEL_INFO, message)
+        item_dict = {"type": self.EVENT_LOG,
+                     "timestamp": timestamp,
+                     "level": self.LOG_LEVEL_INFO,
+                     "source": source,
+                     "message": message}
+        self.__q(item_dict)
 
     def log_warn(self, timestamp, source, message):
-        self._add_table_row(timestamp, source, self.LOG_LEVEL_WARN, message)
+        item_dict = {"type": self.EVENT_LOG,
+                     "timestamp": timestamp,
+                     "level": self.LOG_LEVEL_WARN,
+                     "source": source,
+                     "message": message}
+        self.__q(item_dict)
 
     def log_error(self, timestamp, source, message):
-        self._add_table_row(timestamp, source, self.LOG_LEVEL_ERROR, message)
+        item_dict = {"type": self.EVENT_LOG,
+                     "timestamp": timestamp,
+                     "level": self.LOG_LEVEL_ERROR,
+                     "source": source,
+                     "message": message}
+        self.__q(item_dict)
 
     def log_critical(self, timestamp, source, message):
-        self._add_table_row(timestamp, source, self.LOG_LEVEL_CRITICAL, message)
+        item_dict = {"type": self.EVENT_LOG,
+                     "timestamp": timestamp,
+                     "level": self.LOG_LEVEL_CRITICAL,
+                     "source": source,
+                     "message": message}
+        self.__q(item_dict)
 
     def log(self, timestamp, source, message, level=LOG_LEVEL_INFO):
-        self._add_table_row(timestamp, source, level, message)
+        item_dict = {"type": self.EVENT_LOG,
+                     "timestamp": timestamp,
+                     "level": level,
+                     "source": source,
+                     "message": message}
+        self.__q(item_dict)
 
+    def stopped(self):
+        return self._stop_event.is_set()
+
+    def shutdown(self):
+        item_dict = {"type": self.EVENT_SHUTDOWN}
+        self.__q(item_dict)
+
+    def _event_shutdown(self):
+        self._stop_event.set()
+
+    def run(self):
+        self.logger.info(f"{self._tag_root} run thread started")
+        while not self.stopped():
+
+            try:
+                item = self._q.get(block=True)
+                self.logger.debug(item)
+
+                with self._lock:
+                    if item["type"] == self.EVENT_LOG:
+                        self._event_log(item)
+
+                    elif item["type"] == self.EVENT_CLEAR:
+                        self._event_clear(item)
+
+                    elif item["type"] == self.EVENT_EXPORT:
+                        self._event_export(item)
+
+                    elif item["type"] == self.EVENT_SHUTDOWN:
+                        self._event_shutdown()
+
+                    else:
+                        self.logger.error("Unknown event: {}".format(item["type"]))
+
+            except queue.Empty:
+                pass
+            except Exception as e:
+                self.logger.error("Error processing event {}, {}".format(e, item["type"]))
+                traceback.print_exc()
+
+            time.sleep(0)  # allow other threads to run if any, in the case that the queue is full
+
+        self.logger.info(f"{self._tag_root} run thread stopped")
