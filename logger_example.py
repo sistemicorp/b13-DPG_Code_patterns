@@ -2,16 +2,6 @@ import dearpygui.dearpygui as dpg
 from threading import Timer
 from logger_klass import Logger
 
-import logging
-logger = logging.getLogger()
-FORMAT = "%(asctime)s: %(funcName)25s %(levelname)-5.5s :%(lineno)4s: %(message)s"
-formatter = logging.Formatter(FORMAT)
-consoleHandler = logging.StreamHandler()
-consoleHandler.setFormatter(formatter)
-logger.addHandler(consoleHandler)
-logger.setLevel(logging.INFO)
-
-
 dpg.create_context()
 dpg.create_viewport()
 dpg.setup_dearpygui()
@@ -23,8 +13,11 @@ with dpg.window(label="Logger", width=WINDOW_WIDTH, height=600):
 
 
 def _timer_cb():
+    """ This timer simulates log lines being sent
+    - diffent sources and log levels are used
+    :return:
+    """
     global _tmr
-    global _text_accum
     global count
     count += 1
 
@@ -57,19 +50,11 @@ def _timer_cb():
 
 
 count = 0
-_text_accum = "Now is the time\n"
-
 _tmr = Timer(1, _timer_cb)
 _tmr.start()
 
 dpg.show_viewport()
-
-#dpg.show_style_editor()
-
-
 dpg.start_dearpygui()
-
 _tmr.cancel()
-
 dpg.destroy_context()
 
