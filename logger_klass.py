@@ -14,6 +14,10 @@ class Logger(Thread):
       - log level, see LOG_LEVEL_*
       - message, a string to display
 
+    Notes:
+        1) DPG callbacks are wrapped in a lambda as a workaround for a bug
+           associated with using Nuitka compiler, which I use a lot.
+
     """
 
     LOG_LEVEL_TRACE = 0
@@ -168,11 +172,7 @@ class Logger(Thread):
     def _create_listbox_sources_items(self):
         listbox_sources = ["ALL_ON", "ALL_OFF"]
         for k, v in self._sources.items():
-            if v["show"]:
-                item_string = f"{k} ON"
-            else:
-                item_string = f"{k} OFF"
-
+            item_string = f"{k} ON" if v["show"] else f"{k} OFF"
             listbox_sources.append(item_string)
 
         return listbox_sources
@@ -211,8 +211,7 @@ class Logger(Thread):
         theme = self.LOG_LEVEL_MAP[log_level]["theme"]
 
         dpg.push_container_stack(self.__tag("table"))
-        with dpg.table_row(height=self.TABLE_FONT_HEIGHT,
-                           user_data=(log_level, source),
+        with dpg.table_row(user_data=(log_level, source),
                            show=show_row,
                            tag=self.__tag(f"row_{self._table_rows}")):
 
@@ -338,19 +337,13 @@ class Logger(Thread):
     def _is_row_showing(self, row_tag):
         row_level, row_source = dpg.get_item_user_data(row_tag)
         source_show = self._sources[row_source]["show"]
-        if row_level < self._log_level or not source_show:
-            return False
-
-        return True
+        return row_level >= self._log_level and source_show
 
     def __update_show_rows(self):
         with self._lock:
             for i in range(self._table_rows):
                 row_tag = self.__tag(f"row_{i}")
-                if self._is_row_showing(row_tag):
-                    dpg.show_item(row_tag)
-                else:
-                    dpg.hide_item(row_tag)
+                dpg.configure_item(row_tag, show=self._is_row_showing(row_tag))
 
     def _cb_combo_level(self, sender, app_data, user_data):
         self.logger.info(f"{sender} {app_data} {user_data}")
