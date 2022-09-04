@@ -6,6 +6,15 @@ import time
 
 
 class Logger(Thread):
+    """
+    Creates a Window to display log lines.
+    - log lines have
+      - timestamp, could be anything really, an integer, or epoch, must be string
+      - source, a string representing the source library or module, could always be "main"
+      - log level, see LOG_LEVEL_*
+      - message, a string to display
+
+    """
 
     LOG_LEVEL_TRACE = 0
     LOG_LEVEL_DEBUG = 1
@@ -24,7 +33,7 @@ class Logger(Thread):
     TABLE_COL_TIMESTAMP_WIDTH = 6  # num characters
     TABLE_COL_SOURCE_WIDTH = 5
     TABLE_COL_LOGLEVEL_WIDTH = 7
-    TABLE_COL_MSG_WIDTH = 20
+    TABLE_COL_MSG_WIDTH = 80
     TABLE_FIXED_WIDTH = TABLE_COL_TIMESTAMP_WIDTH + TABLE_COL_SOURCE_WIDTH + TABLE_COL_LOGLEVEL_WIDTH
 
     TABLE_FONT_HEIGHT = 8
@@ -33,6 +42,13 @@ class Logger(Thread):
     EVENT_LOG = "EVENT_LOG"
     EVENT_EXPORT = "EVENT_EXPORT"
     EVENT_CLEAR = "EVENT_CLEAR"
+
+    # colors found by trial and error from: https://rgbacolorpicker.com/
+    SOURCE_ROW_COLORBG = [
+        (145, 116, 70, 80), (246, 250, 197, 80), (133, 144, 0, 80), (121, 44, 80, 80), (243, 129, 182, 60),
+        (3, 137, 130, 80), (27, 76, 136, 80), (52, 63, 77, 80),
+        (136, 248, 167, 80), (79, 150, 146, 80), (5, 172, 52, 80), (175, 31, 31, 80)
+    ]
 
     def __init__(self, label="Logger", tag_root="logger", export_filename="log.txt", loggerIn=None):
         super(Logger, self).__init__()
@@ -52,13 +68,14 @@ class Logger(Thread):
         self._tags = []
         self._export_filename = export_filename
         self._table_width = 0  # tracks and creates horizontal scrollbar
-        self._table_rows = 0
         self._scrolling = True
+        self._table_rows = 0
         self._log_level = self.LOG_LEVEL_INFO
         self._lock = Lock()
         self._q = queue.Queue()
         self._stop_event = Event()
-        self._sources = {}
+        self._sources = {}  # keys are from SOURCE
+                            # {"show": True, "theme": <obj>}
 
         self._rows = []
 
@@ -78,6 +95,7 @@ class Logger(Thread):
             with dpg.theme() as theme:
                 with dpg.theme_component(0):
                     dpg.add_theme_color(dpg.mvThemeCol_Text, v["color"])
+
             self.LOG_LEVEL_MAP[k]["theme"] = theme
 
         with dpg.group(horizontal=True):
@@ -118,7 +136,6 @@ class Logger(Thread):
                               track_offset=-1.0):
 
             with dpg.table(header_row=False,
-                           row_background=True,
                            tag=self.__tag("table")):
 
                 dpg.add_table_column(width=self.TABLE_COL_TIMESTAMP_WIDTH * self.TABLE_FONT_WIDTH,
@@ -149,7 +166,7 @@ class Logger(Thread):
         return tag
 
     def _create_listbox_sources_items(self):
-        listbox_sources = []
+        listbox_sources = ["ALL_ON", "ALL_OFF"]
         for k, v in self._sources.items():
             if v["show"]:
                 item_string = f"{k} ON"
@@ -166,6 +183,8 @@ class Logger(Thread):
             # update the listbox
             listbox_sources = self._create_listbox_sources_items()
             dpg.configure_item(self.__tag("combo_sources"), items=listbox_sources)
+            idx = len(self._sources) - 1
+            self._sources[source]["color"] = self.SOURCE_ROW_COLORBG[idx]
 
         return self._sources[source]["show"]
 
@@ -182,7 +201,9 @@ class Logger(Thread):
 
         def _set_table_width(row_items):
             # causes horizontal scroll bar to appear if necessary
-            w = (self.TABLE_FIXED_WIDTH + len(row_items[self.ROW_IDX_MSG])) * self.TABLE_FONT_WIDTH
+            w1 = (self.TABLE_FIXED_WIDTH + len(row_items[self.ROW_IDX_MSG])) * self.TABLE_FONT_WIDTH
+            w2 = (self.TABLE_FIXED_WIDTH + self.TABLE_COL_MSG_WIDTH) * self.TABLE_FONT_WIDTH
+            w = max(w1, w2)
             if w > self._table_width:
                 self._table_width = w
                 dpg.configure_item(self.__tag("table"), width=w)
@@ -225,6 +246,8 @@ class Logger(Thread):
                                      user_data=(self.ROW_IDX_MSG, self._table_rows))
             dpg.bind_item_theme(sel, theme)
 
+        dpg.highlight_table_row(self.__tag("table"), self._table_rows, self._sources[source]["color"])
+
         self._table_rows += 1
 
         dpg.pop_container_stack()
@@ -238,8 +261,19 @@ class Logger(Thread):
 
     def _cb_combo_sources(self, sender, app_data, user_data):
         self.logger.info(f"{sender} {app_data} {user_data}")
-        source = app_data.split(" ")[0]
-        self._sources[source]["show"] = not self._sources[source]["show"]
+
+        if app_data == "ALL_ON":
+            for k, v in self._sources.items():
+                v["show"] = True
+
+        elif app_data == "ALL_OFF":
+            for k, v in self._sources.items():
+                v["show"] = False
+
+        else:
+            source = app_data.split(" ")[0]
+            self._sources[source]["show"] = not self._sources[source]["show"]
+
         self.__update_show_rows()
         listbox_sources = self._create_listbox_sources_items()
         dpg.configure_item(self.__tag("combo_sources"), items=listbox_sources)
