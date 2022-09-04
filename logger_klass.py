@@ -45,8 +45,8 @@ class Logger(Thread):
 
     # colors found by trial and error from: https://rgbacolorpicker.com/
     SOURCE_ROW_COLORBG = [
-        (145, 116, 70, 80), (246, 250, 197, 80), (133, 144, 0, 80), (121, 44, 80, 80), (243, 129, 182, 60),
-        (3, 137, 130, 80), (27, 76, 136, 80), (52, 63, 77, 80),
+        (27, 76, 136, 80), (52, 63, 77, 80), (145, 116, 70, 80), (246, 250, 197, 80),
+        (133, 144, 0, 80), (121, 44, 80, 80), (243, 129, 182, 60), (3, 137, 130, 80),
         (136, 248, 167, 80), (79, 150, 146, 80), (5, 172, 52, 80), (175, 31, 31, 80)
     ]
 
@@ -183,7 +183,7 @@ class Logger(Thread):
             # update the listbox
             listbox_sources = self._create_listbox_sources_items()
             dpg.configure_item(self.__tag("combo_sources"), items=listbox_sources)
-            idx = len(self._sources) - 1
+            idx = (len(self._sources) - 1) % len(self.SOURCE_ROW_COLORBG)  # recycle colors if too many
             self._sources[source]["color"] = self.SOURCE_ROW_COLORBG[idx]
 
         return self._sources[source]["show"]
