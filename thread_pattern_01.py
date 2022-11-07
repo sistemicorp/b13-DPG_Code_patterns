@@ -7,12 +7,10 @@ their own thread via a class.
 
 """
 import dearpygui.dearpygui as dpg
-from threading import Thread, Lock, Event, Timer
+from threading import Thread, Lock, Event
 import queue
 import time
 import traceback
-from pubsub import pub
-from dataclasses import dataclass
 import logging
 logger = logging.getLogger()
 FORMAT = "%(asctime)s: %(filename)22s %(funcName)25s %(levelname)-5.5s :%(lineno)4s: %(message)s"
@@ -21,12 +19,6 @@ consoleHandler = logging.StreamHandler()
 consoleHandler.setFormatter(formatter)
 logger.addHandler(consoleHandler)
 logger.setLevel(logging.INFO)
-
-
-@dataclass(frozen=True)
-class PUB:
-
-    SHUTDOWN = "SHUTDOWN"
 
 
 class Worker(Thread):
@@ -41,7 +33,8 @@ class Worker(Thread):
         self._q = queue.Queue()
         self._stop_event = Event()
 
-        pub.subscribe(self.onPubSHUTDOWN, PUB.SHUTDOWN)
+        # Note: you can create your dpg widgets here, create the widgets
+        #       and put the callbacks in the same class
 
         self.name = name
         self.start()
@@ -50,20 +43,16 @@ class Worker(Thread):
         logger.debug(item_dict)
         self._q.put(item_dict)
 
-    def onPubSHUTDOWN(self, item_dict, topic=pub.AUTO_TOPIC):
-        logger.info(f"{topic.getName()} - {item_dict}")
-        self.shutdown()
-
     def shutdown(self):
         item_dict = {"type": self.EVENT_SHUTDOWN, "from": "shutdown"}
         self.__q(item_dict)
+        self.join()
 
-    def stopped(self):
+    def is_stopped(self):
         return self._stop_event.is_set()
 
     def _event_shutdown(self):
         self._stop_event.set()
-        pub.unsubscribe(self.onPubSHUTDOWN,        PUB.SHUTDOWN)
         logger.info(f"{self.name} shutdown")
 
     # ------------- Your specific code goes here --------------------
@@ -120,10 +109,15 @@ worker = Worker()
 
 with dpg.window(label="Example", height=100, width=100):
     dpg.add_text("Hello world")
+
+    # NOTE: the callback happens on the worker thread
     dpg.add_button(tag="b1", label="Button1", callback=worker.cb_button1)
 
 dpg.show_viewport()
 dpg.start_dearpygui()
+
+# shut thread down properly
+worker.shutdown()
+
 dpg.destroy_context()
-pub.sendMessage(PUB.SHUTDOWN, item_dict={"from": "main"})
 
