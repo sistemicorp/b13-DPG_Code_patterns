@@ -21,13 +21,13 @@ logger.addHandler(consoleHandler)
 logger.setLevel(logging.INFO)
 
 
-class Worker(Thread):
+# Put this in a separate file
+class WorkerBase(Thread):
 
     EVENT_SHUTDOWN = "EVENT_SHUTDOWN"
-    EVENT_CB_BUTTON1 = "EVENT_CB_BUTTON1"
 
     def __init__(self, name="Worker"):
-        super(Worker, self).__init__()
+        super().__init__()
 
         self._lock = Lock()
         self._q = queue.Queue()
@@ -39,13 +39,13 @@ class Worker(Thread):
         self.name = name
         self.start()
 
-    def __q(self, item_dict: dict):
+    def enqueue(self, item_dict: dict):
         logger.debug(item_dict)
         self._q.put(item_dict)
 
     def shutdown(self):
         item_dict = {"type": self.EVENT_SHUTDOWN, "from": "shutdown"}
-        self.__q(item_dict)
+        self.enqueue(item_dict)
         self.join()
 
     def is_stopped(self):
@@ -55,20 +55,8 @@ class Worker(Thread):
         self._stop_event.set()
         logger.info(f"{self.name} shutdown")
 
-    # ------------- Your specific code goes here --------------------
-    # For any GUI event, do the work on this class's thread, leaving
-    # the DPG thread to run as fast as possible
-
-    def _event_button1(self, item: dict):
-        # this is now running on its own thread
-        logger.info(item)
-
-    def cb_button1(self, sender, app_data, user_data):
-        logger.info(f"sender: {sender} {app_data} {user_data}")
-        item_dict = {"type": self.EVENT_CB_BUTTON1,
-                     "cb": dict(s=sender, a=app_data, u=user_data),
-                     "from": "cb_button1"}
-        self.__q(item_dict)
+    def subc_events(self, item):
+        return False
 
     def run(self):
         logger.info(f"{self.name} run thread started")
@@ -82,10 +70,8 @@ class Worker(Thread):
                     if item["type"] == self.EVENT_SHUTDOWN:
                         self._event_shutdown()
 
-                    # ------------- Your specific code goes here --------------------
-
-                    elif item["type"] == self.EVENT_CB_BUTTON1:
-                        self._event_button1(item)
+                    elif self.subc_events(item):
+                        pass
 
                     else:
                         logger.error("Unknown event: {}".format(item["type"]))
@@ -99,6 +85,46 @@ class Worker(Thread):
             time.sleep(0)  # allow other threads to run if any, in the case that the queue is full
 
         logger.info(f"{self.name} run thread stopped")
+
+
+class Worker(WorkerBase):
+
+    EVENT_CB_BUTTON1 = "EVENT_CB_BUTTON1"
+
+    def __init__(self, name="Worker"):
+        super().__init__()
+
+        # Note: you can create your dpg widgets here, create the widgets
+        #       and put the callbacks in the same class
+
+    # ------------- Your specific code goes here --------------------
+    # For any GUI event, do the work on this class's thread, leaving
+    # the DPG thread to run as fast as possible
+
+    def _event_button1(self, item: dict):
+        # this is now running on its own thread
+        # this call is also protected by a lock
+        logger.info(item)
+
+    def cb_button1(self, sender, app_data, user_data):
+        # this is called on the client thread, in this case the DPG thread
+        logger.info(f"sender: {sender} {app_data} {user_data}")
+        item_dict = {"type": self.EVENT_CB_BUTTON1,
+                     "cb": dict(s=sender, a=app_data, u=user_data),
+                     "from": "cb_button1"}
+        self.enqueue(item_dict)
+
+    def subc_event_handler(self, item):
+        if item["type"] == self.EVENT_CB_BUTTON1:
+            self._event_button1(item)
+            return True
+
+        # elif item["type"] == self.EVENT_something:
+        #     ... code ...
+        #     return True
+
+        else:
+            return False
 
 
 dpg.create_context()
